@@ -100,6 +100,16 @@ app.use('/api/v2', authV2Routes);
 
 
 // ============================================================
+// 10.1 Ruta raíz simple (salud de la API)
+//     Solo para verificar que el backend está vivo.
+// ============================================================
+app.get('/', (req, res) => {
+  res.send('API Rincón Sabor backend OK');
+});
+
+
+
+// ============================================================
 // 11. Arranque del servidor HTTP + WebSocket
 // ============================================================
 server.listen(PORT, '0.0.0.0', () => {
