@@ -1,0 +1,16 @@
+{
+  "all": true,
+  "include": [
+    "routes/**/*.js",
+    "services/**/*.js",
+    "middlewares/**/*.js",
+    "database/**/*.js"
+  ],
+  "exclude": [
+    "test",
+    "node_modules",
+    "coverage"
+  ],
+  "reporter": ["text", "html"],
+  "report-dir": "coverage"
+}
