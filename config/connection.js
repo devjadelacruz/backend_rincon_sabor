@@ -2,12 +2,28 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
+const {
+  DB_HOST,
+  DB_PORT,
+  DB_USER,
+  DB_PASSWORD,
+  DB_NAME,
+} = process.env;
+
+// 👇 DEBUG: ver exactamente a qué DB se está conectando Render
+console.log('🌐 Config DB desde connection.js:', {
+  DB_HOST,
+  DB_PORT,
+  DB_USER,
+  DB_NAME,
+});
+
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
+  host: DB_HOST || 'localhost',
+  port: DB_PORT ? Number(DB_PORT) : 3306,
+  user: DB_USER,
+  password: DB_PASSWORD,
+  database: DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,

@@ -22,6 +22,12 @@ router.post('/login', async (req, res) => {
         message: 'Debe enviar el campo "email" en el body JSON.',
       });
     }
+    
+// 👇 DEBUG: ver si el backend realmente ve dbo_usuarios
+const debugTables = await query('SHOW TABLES LIKE "dbo_usuarios"');
+console.log('🔍 Tablas que coinciden con dbo_usuarios (desde Node):', debugTables);
+
+
 
     // 2) Buscar usuario por email
     const sql = `
