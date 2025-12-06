@@ -10,10 +10,10 @@ const obtenerHistorialVentas = async () => {
       d.detallePedidoMenuCodigo AS MenuCodigo,
       m.MenuPlatos,
       d.detallePedidoCantidad AS CantidadVendida
-    FROM pedidos_pedido p
-    JOIN pedidos_detallepedido d
+    FROM Pedidos_pedido p
+    JOIN Pedidos_DetallePedido d
       ON d.detallePedidoPedidoCodigo = p.PedidoCodigo
-    JOIN pedidos_menu m
+    JOIN Pedidos_Menu m
       ON m.MenuCodigo = d.detallePedidoMenuCodigo
     WHERE p.PedidoEstado = 'Servido'
   `);
