@@ -10,7 +10,7 @@ const {
   DB_NAME,
 } = process.env;
 
-// 👇 DEBUG: ver exactamente a qué DB se está conectando Render
+// 👀 Log de debug (ya lo tenías)
 console.log('🌐 Config DB desde connection.js:', {
   DB_HOST,
   DB_PORT,
@@ -27,12 +27,21 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  charset: 'utf8mb4', // aseguramos utf8mb4
 });
 
 // Helper para hacer consultas rápidas: query('SELECT ...', [params])
+// 👇 Aquí forzamos la colación de la conexión en CADA query
 async function query(sql, params = []) {
-  const [rows] = await pool.execute(sql, params);
-  return rows;
+  const connection = await pool.getConnection();
+  try {
+    // Forzar collation de la conexión a la misma que tus tablas
+    await connection.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+    const [rows] = await connection.execute(sql, params);
+    return rows;
+  } finally {
+    connection.release();
+  }
 }
 
 module.exports = { pool, query };
