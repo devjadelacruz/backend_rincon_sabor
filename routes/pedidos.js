@@ -243,22 +243,21 @@ router.post('/crearPedido', async (req, res) => {
     });
   }
 
-  // Usuario que crea el pedido (si viene por v2 con JWT)
+  // Usuario que está creando el pedido (JWT v2)
   const usuarioCodigo = req.user?.UsuarioCodigo || null;
-  const usuarioRol    = req.user?.UsuarioRol    || null; // por si lo usas después
+  const usuarioRol    = req.user?.UsuarioRol    || null;
 
   const conn = await pool.getConnection();
 
   try {
     await conn.beginTransaction();
 
-    // 1) Crear pedido (cabecera + detalles) vía SP (usa JSON)
+    // 1) Crear pedido (cabecera + detalles) vía SP
     const detallesJson = JSON.stringify(Detalles);
 
-    // 👇 AHORA el SP solo recibe 2 parámetros: (MesaCodigo, DetallesJson)
     const [rows] = await conn.query(
-      `CALL ${SP_CREAR_PEDIDO}(?, ?)`,
-      [MesaCodigo, detallesJson]
+      `CALL ${SP_CREAR_PEDIDO}(?, ?, ?, ?)`,
+      [MesaCodigo, detallesJson, usuarioCodigo, usuarioRol]
     );
 
     const created = unwrapRows(rows);
@@ -268,22 +267,12 @@ router.post('/crearPedido', async (req, res) => {
       throw new Error('No se pudo obtener el código del pedido creado.');
     }
 
-    // 2) Guardar quién hizo el pedido en la cabecera (PedidoUsuarioMesero)
-    if (usuarioCodigo) {
-      await conn.query(
-        `UPDATE Pedidos_Pedido
-           SET PedidoUsuarioMesero = ?
-         WHERE PedidoCodigo = ?`,
-        [usuarioCodigo, pedidoCodigo]
-      );
-    }
-
-    // 3) Ajustar stock por cada detalle (igual que antes)
+    // 2) Ajustar stock por cada detalle
     for (const d of Detalles) {
       const cantidad = Number(d.detallePedidoCantidad || 0);
 
       if (d.MenuEsPreparado === 'A') {
-        // Menú con receta → Proc_ProcesarMenu
+        // Menú con receta
         await conn.query(
           `CALL ${SP_PROCESAR_MENU}(?, ?)`,
           [d.detallePedidoMenuCodigo, cantidad]
@@ -294,17 +283,17 @@ router.post('/crearPedido', async (req, res) => {
           'SELECT MenuInsumoCodigo FROM Pedidos_Menu WHERE MenuCodigo = ?',
           [d.detallePedidoMenuCodigo]
         );
-        const insumoCodigo = menuRows[0]?.MenuInsumoCodigo;
 
+        const insumoCodigo = menuRows[0]?.MenuInsumoCodigo;
         if (!insumoCodigo) {
           throw new Error(`No hay insumo asociado al menú ${d.detallePedidoMenuCodigo}`);
         }
 
         const [updResult] = await conn.execute(
           `UPDATE dbo_Insumos
-              SET InsumoStockActual = InsumoStockActual - ?
-            WHERE InsumoCodigo = ?
-              AND InsumoStockActual >= ?`,
+             SET InsumoStockActual = InsumoStockActual - ?
+           WHERE InsumoCodigo = ?
+             AND InsumoStockActual >= ?`,
           [cantidad, insumoCodigo, cantidad]
         );
 
@@ -314,7 +303,6 @@ router.post('/crearPedido', async (req, res) => {
       }
     }
 
-    // 4) Commit
     await conn.commit();
     emitirActualizacionPedidos();
 
@@ -324,9 +312,7 @@ router.post('/crearPedido', async (req, res) => {
       PedidoCodigo: pedidoCodigo
     });
   } catch (err) {
-    try {
-      await conn.rollback();
-    } catch {}
+    try { await conn.rollback(); } catch {}
     console.error('Error al crear pedido:', err);
     res.status(500).json({
       success: false,
