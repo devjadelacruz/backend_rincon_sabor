@@ -132,12 +132,13 @@ router.post('/actualizarDetallesPedido', async (req, res) => {
     });
   }
 });
+
+
 // ============================================================
 // POST /pedido/crearPedido
 // Usa transacción MySQL + SP Proc_CrearPedido + ajuste de stock
-// + registra al MESERO que crea el pedido
+// Ahora también guarda quién creó el pedido (mesero/admin).
 // ============================================================
-
 // router.post('/crearPedido', async (req, res) => {
 //   const { MesaCodigo, Detalles } = req.body;
 
@@ -148,8 +149,10 @@ router.post('/actualizarDetallesPedido', async (req, res) => {
 //     });
 //   }
 
-//   // 🆕 Si viene desde /api/v2/mesero/pedidos/..., authJwt ya llenó req.user
-//   const usuarioCodigoMesero = req.user?.UsuarioCodigo || null;
+//   // 🧑‍🍳 Usuario que está creando el pedido (si viene por v2 con JWT)
+//   // En /pedidos/crearPedido clásico, req.user será undefined y se enviará NULL.
+//   const usuarioCodigo = req.user?.UsuarioCodigo || null;
+//   const usuarioRol    = req.user?.UsuarioRol    || null;
 
 //   const conn = await pool.getConnection();
 //   try {
@@ -158,10 +161,13 @@ router.post('/actualizarDetallesPedido', async (req, res) => {
 //     // 1) Crear pedido (cabecera + detalles) vía SP (usa JSON)
 //     const detallesJson = JSON.stringify(Detalles);
 
+//     // 👇 AHORA el SP recibe 4 parámetros:
+//     // (MesaCodigo, DetallesJson, UsuarioCodigo, UsuarioRol)
 //     const [rows] = await conn.query(
-//       `CALL ${SP_CREAR_PEDIDO}(?, ?)`,
-//       [MesaCodigo, detallesJson]
+//       `CALL ${SP_CREAR_PEDIDO}(?, ?, ?, ?)`,
+//       [MesaCodigo, detallesJson, usuarioCodigo, usuarioRol]
 //     );
+
 //     const created = unwrapRows(rows);
 //     const pedidoCodigo = created[0]?.PedidoCodigoCreado;
 
@@ -169,26 +175,18 @@ router.post('/actualizarDetallesPedido', async (req, res) => {
 //       throw new Error('No se pudo obtener el código del pedido creado.');
 //     }
 
-//     // 🆕 2) Guardar el mesero que creó el pedido (si viene en el token)
-//     if (usuarioCodigoMesero) {
-//       await conn.execute(
-//         `UPDATE Pedidos_Pedido
-//            SET PedidoUsuarioMesero = ?
-//          WHERE PedidoCodigo = ?`,
-//         [usuarioCodigoMesero, pedidoCodigo]
-//       );
-//     }
-
-//     // 3) Ajustar stock por cada detalle (esto ya lo tenías)
+//     // 2) Ajustar stock por cada detalle (igual que antes)
 //     for (const d of Detalles) {
 //       const cantidad = Number(d.detallePedidoCantidad || 0);
 
 //       if (d.MenuEsPreparado === 'A') {
+//         // Menú con receta → Proc_ProcesarMenu
 //         await conn.query(
 //           `CALL ${SP_PROCESAR_MENU}(?, ?)`,
 //           [d.detallePedidoMenuCodigo, cantidad]
 //         );
 //       } else {
+//         // Menú simple (directo a insumo)
 //         const [menuRows] = await conn.execute(
 //           'SELECT MenuInsumoCodigo FROM Pedidos_Menu WHERE MenuCodigo = ?',
 //           [d.detallePedidoMenuCodigo]
@@ -212,7 +210,7 @@ router.post('/actualizarDetallesPedido', async (req, res) => {
 //       }
 //     }
 
-//     // 4) Commit
+//     // 3) Commit
 //     await conn.commit();
 //     emitirActualizacionPedidos();
 
@@ -235,11 +233,6 @@ router.post('/actualizarDetallesPedido', async (req, res) => {
 //   }
 // });
 
-// ============================================================
-// POST /pedido/crearPedido
-// Usa transacción MySQL + SP Proc_CrearPedido + ajuste de stock
-// Ahora también guarda quién creó el pedido (mesero/admin).
-// ============================================================
 router.post('/crearPedido', async (req, res) => {
   const { MesaCodigo, Detalles } = req.body;
 
@@ -250,23 +243,22 @@ router.post('/crearPedido', async (req, res) => {
     });
   }
 
-  // 🧑‍🍳 Usuario que está creando el pedido (si viene por v2 con JWT)
-  // En /pedidos/crearPedido clásico, req.user será undefined y se enviará NULL.
+  // Usuario que crea el pedido (si viene por v2 con JWT)
   const usuarioCodigo = req.user?.UsuarioCodigo || null;
-  const usuarioRol    = req.user?.UsuarioRol    || null;
+  const usuarioRol    = req.user?.UsuarioRol    || null; // por si lo usas después
 
   const conn = await pool.getConnection();
+
   try {
     await conn.beginTransaction();
 
     // 1) Crear pedido (cabecera + detalles) vía SP (usa JSON)
     const detallesJson = JSON.stringify(Detalles);
 
-    // 👇 AHORA el SP recibe 4 parámetros:
-    // (MesaCodigo, DetallesJson, UsuarioCodigo, UsuarioRol)
+    // 👇 AHORA el SP solo recibe 2 parámetros: (MesaCodigo, DetallesJson)
     const [rows] = await conn.query(
-      `CALL ${SP_CREAR_PEDIDO}(?, ?, ?, ?)`,
-      [MesaCodigo, detallesJson, usuarioCodigo, usuarioRol]
+      `CALL ${SP_CREAR_PEDIDO}(?, ?)`,
+      [MesaCodigo, detallesJson]
     );
 
     const created = unwrapRows(rows);
@@ -276,7 +268,17 @@ router.post('/crearPedido', async (req, res) => {
       throw new Error('No se pudo obtener el código del pedido creado.');
     }
 
-    // 2) Ajustar stock por cada detalle (igual que antes)
+    // 2) Guardar quién hizo el pedido en la cabecera (PedidoUsuarioMesero)
+    if (usuarioCodigo) {
+      await conn.query(
+        `UPDATE Pedidos_Pedido
+           SET PedidoUsuarioMesero = ?
+         WHERE PedidoCodigo = ?`,
+        [usuarioCodigo, pedidoCodigo]
+      );
+    }
+
+    // 3) Ajustar stock por cada detalle (igual que antes)
     for (const d of Detalles) {
       const cantidad = Number(d.detallePedidoCantidad || 0);
 
@@ -293,15 +295,16 @@ router.post('/crearPedido', async (req, res) => {
           [d.detallePedidoMenuCodigo]
         );
         const insumoCodigo = menuRows[0]?.MenuInsumoCodigo;
+
         if (!insumoCodigo) {
           throw new Error(`No hay insumo asociado al menú ${d.detallePedidoMenuCodigo}`);
         }
 
         const [updResult] = await conn.execute(
           `UPDATE dbo_Insumos
-             SET InsumoStockActual = InsumoStockActual - ?
-           WHERE InsumoCodigo = ?
-             AND InsumoStockActual >= ?`,
+              SET InsumoStockActual = InsumoStockActual - ?
+            WHERE InsumoCodigo = ?
+              AND InsumoStockActual >= ?`,
           [cantidad, insumoCodigo, cantidad]
         );
 
@@ -311,7 +314,7 @@ router.post('/crearPedido', async (req, res) => {
       }
     }
 
-    // 3) Commit
+    // 4) Commit
     await conn.commit();
     emitirActualizacionPedidos();
 
@@ -333,6 +336,8 @@ router.post('/crearPedido', async (req, res) => {
     conn.release();
   }
 });
+
+
 
 // ============================================================
 // DELETE /pedido/eliminar/:PedidoCodigo
