@@ -2,6 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { authJwt } = require('../middlewares/authJwt');
 
 const { pool, query } = require('../config/connection');
 const { emitirActualizacionMesas } = require('../sockets/mesasSocket');
@@ -133,107 +134,12 @@ router.post('/actualizarDetallesPedido', async (req, res) => {
   }
 });
 
-
 // ============================================================
 // POST /pedido/crearPedido
-// Usa transacción MySQL + SP Proc_CrearPedido + ajuste de stock
-// Ahora también guarda quién creó el pedido (mesero/admin).
-// ============================================================
-// router.post('/crearPedido', async (req, res) => {
-//   const { MesaCodigo, Detalles } = req.body;
+// Crea un nuevo pedido y ajusta stock
+// ============================================================ 
 
-//   if (!MesaCodigo || !Array.isArray(Detalles) || Detalles.length === 0) {
-//     return res.status(400).json({
-//       success: false,
-//       message: 'Datos inválidos: se requiere MesaCodigo y lista de Detalles.'
-//     });
-//   }
-
-//   // 🧑‍🍳 Usuario que está creando el pedido (si viene por v2 con JWT)
-//   // En /pedidos/crearPedido clásico, req.user será undefined y se enviará NULL.
-//   const usuarioCodigo = req.user?.UsuarioCodigo || null;
-//   const usuarioRol    = req.user?.UsuarioRol    || null;
-
-//   const conn = await pool.getConnection();
-//   try {
-//     await conn.beginTransaction();
-
-//     // 1) Crear pedido (cabecera + detalles) vía SP (usa JSON)
-//     const detallesJson = JSON.stringify(Detalles);
-
-//     // 👇 AHORA el SP recibe 4 parámetros:
-//     // (MesaCodigo, DetallesJson, UsuarioCodigo, UsuarioRol)
-//     const [rows] = await conn.query(
-//       `CALL ${SP_CREAR_PEDIDO}(?, ?, ?, ?)`,
-//       [MesaCodigo, detallesJson, usuarioCodigo, usuarioRol]
-//     );
-
-//     const created = unwrapRows(rows);
-//     const pedidoCodigo = created[0]?.PedidoCodigoCreado;
-
-//     if (!pedidoCodigo) {
-//       throw new Error('No se pudo obtener el código del pedido creado.');
-//     }
-
-//     // 2) Ajustar stock por cada detalle (igual que antes)
-//     for (const d of Detalles) {
-//       const cantidad = Number(d.detallePedidoCantidad || 0);
-
-//       if (d.MenuEsPreparado === 'A') {
-//         // Menú con receta → Proc_ProcesarMenu
-//         await conn.query(
-//           `CALL ${SP_PROCESAR_MENU}(?, ?)`,
-//           [d.detallePedidoMenuCodigo, cantidad]
-//         );
-//       } else {
-//         // Menú simple (directo a insumo)
-//         const [menuRows] = await conn.execute(
-//           'SELECT MenuInsumoCodigo FROM Pedidos_Menu WHERE MenuCodigo = ?',
-//           [d.detallePedidoMenuCodigo]
-//         );
-//         const insumoCodigo = menuRows[0]?.MenuInsumoCodigo;
-//         if (!insumoCodigo) {
-//           throw new Error(`No hay insumo asociado al menú ${d.detallePedidoMenuCodigo}`);
-//         }
-
-//         const [updResult] = await conn.execute(
-//           `UPDATE dbo_Insumos
-//              SET InsumoStockActual = InsumoStockActual - ?
-//            WHERE InsumoCodigo = ?
-//              AND InsumoStockActual >= ?`,
-//           [cantidad, insumoCodigo, cantidad]
-//         );
-
-//         if (updResult.affectedRows === 0) {
-//           throw new Error(`Stock insuficiente para insumo ${insumoCodigo}`);
-//         }
-//       }
-//     }
-
-//     // 3) Commit
-//     await conn.commit();
-//     emitirActualizacionPedidos();
-
-//     res.status(201).json({
-//       success: true,
-//       message: 'Pedido creado y stock actualizado correctamente',
-//       PedidoCodigo: pedidoCodigo
-//     });
-//   } catch (err) {
-//     try {
-//       await conn.rollback();
-//     } catch {}
-//     console.error('Error al crear pedido:', err);
-//     res.status(500).json({
-//       success: false,
-//       message: err.message || 'Error interno al crear pedido'
-//     });
-//   } finally {
-//     conn.release();
-//   }
-// });
-
-router.post('/crearPedido', async (req, res) => {
+router.post('/crearPedido', authJwt, async (req, res) => {
   const { MesaCodigo, Detalles } = req.body;
 
   if (!MesaCodigo || !Array.isArray(Detalles) || Detalles.length === 0) {
@@ -243,18 +149,17 @@ router.post('/crearPedido', async (req, res) => {
     });
   }
 
-  // Usuario que está creando el pedido (JWT v2)
-  const usuarioCodigo = req.user?.UsuarioCodigo || null;
-  const usuarioRol    = req.user?.UsuarioRol    || null;
+  // Datos que vienen del JWT (auth_v2.js → authJwt)
+  const usuarioCodigo = req.user?.id  || null;   // UsuarioCodigo
+  const usuarioRol    = req.user?.rol || null;   // admin / mesero / cocinero / cajero
 
   const conn = await pool.getConnection();
-
   try {
     await conn.beginTransaction();
 
-    // 1) Crear pedido (cabecera + detalles) vía SP
     const detallesJson = JSON.stringify(Detalles);
 
+    // SP con 4 parámetros: (MesaCodigo, DetallesJson, UsuarioCodigo, UsuarioRol)
     const [rows] = await conn.query(
       `CALL ${SP_CREAR_PEDIDO}(?, ?, ?, ?)`,
       [MesaCodigo, detallesJson, usuarioCodigo, usuarioRol]
@@ -267,23 +172,20 @@ router.post('/crearPedido', async (req, res) => {
       throw new Error('No se pudo obtener el código del pedido creado.');
     }
 
-    // 2) Ajustar stock por cada detalle
+    // Ajuste de stock (igual que antes)
     for (const d of Detalles) {
       const cantidad = Number(d.detallePedidoCantidad || 0);
 
       if (d.MenuEsPreparado === 'A') {
-        // Menú con receta
         await conn.query(
           `CALL ${SP_PROCESAR_MENU}(?, ?)`,
           [d.detallePedidoMenuCodigo, cantidad]
         );
       } else {
-        // Menú simple (directo a insumo)
         const [menuRows] = await conn.execute(
           'SELECT MenuInsumoCodigo FROM Pedidos_Menu WHERE MenuCodigo = ?',
           [d.detallePedidoMenuCodigo]
         );
-
         const insumoCodigo = menuRows[0]?.MenuInsumoCodigo;
         if (!insumoCodigo) {
           throw new Error(`No hay insumo asociado al menú ${d.detallePedidoMenuCodigo}`);

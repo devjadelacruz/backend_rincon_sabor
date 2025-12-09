@@ -52,8 +52,17 @@ app.use('/usuarios', usuariosRouter);
 app.use('/categorias', categoriasRouter);
 app.use('/insumos', insumosRouter);
 app.use('/menu', menuRouter);
-app.use('/pedidos', pedidosRouter);
+
+// ✅ PROTEGER /pedidos con JWT y roles
+app.use(
+  '/pedidos',
+  authJwt,                        // lee el token y llena req.user
+  requireRole(['admin', 'mesero', 'cocinero', 'cajero']), // los roles que puedan crear pedidos
+  pedidosRouter
+);
+
 app.use('/dataGraficos', dataGraficos);
+
 app.use('/predicciones', prediccionesRouter);
 
 // =====================================================
