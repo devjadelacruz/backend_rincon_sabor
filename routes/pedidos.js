@@ -132,11 +132,12 @@ router.post('/actualizarDetallesPedido', async (req, res) => {
     });
   }
 });
-
 // ============================================================
 // POST /pedido/crearPedido
 // Usa transacción MySQL + SP Proc_CrearPedido + ajuste de stock
+// + registra al MESERO que crea el pedido
 // ============================================================
+
 router.post('/crearPedido', async (req, res) => {
   const { MesaCodigo, Detalles } = req.body;
 
@@ -146,6 +147,9 @@ router.post('/crearPedido', async (req, res) => {
       message: 'Datos inválidos: se requiere MesaCodigo y lista de Detalles.'
     });
   }
+
+  // 🆕 Si viene desde /api/v2/mesero/pedidos/..., authJwt ya llenó req.user
+  const usuarioCodigoMesero = req.user?.UsuarioCodigo || null;
 
   const conn = await pool.getConnection();
   try {
@@ -165,18 +169,26 @@ router.post('/crearPedido', async (req, res) => {
       throw new Error('No se pudo obtener el código del pedido creado.');
     }
 
-    // 2) Ajustar stock por cada detalle
+    // 🆕 2) Guardar el mesero que creó el pedido (si viene en el token)
+    if (usuarioCodigoMesero) {
+      await conn.execute(
+        `UPDATE Pedidos_Pedido
+           SET PedidoUsuarioMesero = ?
+         WHERE PedidoCodigo = ?`,
+        [usuarioCodigoMesero, pedidoCodigo]
+      );
+    }
+
+    // 3) Ajustar stock por cada detalle (esto ya lo tenías)
     for (const d of Detalles) {
       const cantidad = Number(d.detallePedidoCantidad || 0);
 
       if (d.MenuEsPreparado === 'A') {
-        // Menú con receta → Proc_ProcesarMenu
         await conn.query(
           `CALL ${SP_PROCESAR_MENU}(?, ?)`,
           [d.detallePedidoMenuCodigo, cantidad]
         );
       } else {
-        // Menú simple (directo a insumo)
         const [menuRows] = await conn.execute(
           'SELECT MenuInsumoCodigo FROM Pedidos_Menu WHERE MenuCodigo = ?',
           [d.detallePedidoMenuCodigo]
@@ -200,7 +212,7 @@ router.post('/crearPedido', async (req, res) => {
       }
     }
 
-    // 3) Commit
+    // 4) Commit
     await conn.commit();
     emitirActualizacionPedidos();
 
@@ -222,6 +234,7 @@ router.post('/crearPedido', async (req, res) => {
     conn.release();
   }
 });
+
 
 // ============================================================
 // DELETE /pedido/eliminar/:PedidoCodigo
@@ -472,6 +485,7 @@ router.get('/hoy', async (req, res) => {
 
 // ============================================================
 // PUT /pedido/actualizarEstadoPedido/:PedidoCodigo
+// Registra cocinero si el estado pasa a "listo"
 // ============================================================
 router.put('/actualizarEstadoPedido/:PedidoCodigo', async (req, res) => {
   const { PedidoCodigo } = req.params;
@@ -484,11 +498,27 @@ router.put('/actualizarEstadoPedido/:PedidoCodigo', async (req, res) => {
     });
   }
 
+  const usuarioCodigo = req.user?.UsuarioCodigo || null;
+  const estadoLower = String(nuevoEstado).toLowerCase();
+
   try {
+    // 1) Actualizar el estado normal via SP
     await query(
       `CALL ${SP_ACTUALIZAR_ESTADO_PEDIDO}(?, ?)`,
       [PedidoCodigo, nuevoEstado]
     );
+
+    // 2) Si pasa a "listo" y hay usuario logueado → registrar COCINERO
+    if (usuarioCodigo && estadoLower === 'listo') {
+      await query(
+        `
+        UPDATE Pedidos_Pedido
+        SET PedidoUsuarioCocinero = COALESCE(PedidoUsuarioCocinero, ?)
+        WHERE PedidoCodigo = ?
+        `,
+        [usuarioCodigo, PedidoCodigo]
+      );
+    }
 
     emitirActualizacionPedidos(PedidoCodigo);
     res.json({
@@ -503,6 +533,7 @@ router.put('/actualizarEstadoPedido/:PedidoCodigo', async (req, res) => {
     });
   }
 });
+
 
 function toLimaDate(date) {
   return new Date(
@@ -602,11 +633,13 @@ router.put('/actualizarEstadoDetalle/:detallePedidoCodigo', async (req, res) => 
     });
   }
 });
-
 // POST /pedidos/finalizar/:pedidoCodigo
+// Registra quién COBRA el pedido (mesero o admin)
 router.post('/finalizar/:pedidoCodigo', async (req, res) => {
   const { pedidoCodigo } = req.params;      // ej: PED0000001
   const { metodoPagoCodigo } = req.body;    // ej: MPA0000001
+
+  const usuarioCodigo = req.user?.UsuarioCodigo || null;
 
   console.log(
     '📥 POST /pedidos/finalizar',
@@ -625,15 +658,21 @@ router.post('/finalizar/:pedidoCodigo', async (req, res) => {
 
   const sql = `
     UPDATE Pedidos_Pedido
-    SET PedidoMetodoPagoCodigo = ?, PedidoEstado = "servido"
+    SET 
+      PedidoMetodoPagoCodigo = ?,
+      PedidoEstado = "servido",
+      PedidoUsuarioCobro = COALESCE(PedidoUsuarioCobro, ?)
     WHERE PedidoCodigo = ?
   `;
 
   try {
     console.log('🔧 Ejecutando UPDATE de pedido (async/await)...');
 
-    // 👇 Aquí usamos la API de promesas, igual que en el resto del archivo
-    const [result] = await pool.query(sql, [metodoPagoCodigo, pedidoCodigo]);
+    const [result] = await pool.query(sql, [
+      metodoPagoCodigo,
+      usuarioCodigo,
+      pedidoCodigo
+    ]);
 
     console.log('🔧 Resultado UPDATE:', result);
 
@@ -649,7 +688,6 @@ router.post('/finalizar/:pedidoCodigo', async (req, res) => {
       `✅ Pedido ${pedidoCodigo} finalizado (filas afectadas: ${result.affectedRows})`
     );
 
-    // Opcional pero recomendable: avisar por socket que cambió un pedido
     emitirActualizacionPedidos(pedidoCodigo);
 
     return res.json({
@@ -664,6 +702,7 @@ router.post('/finalizar/:pedidoCodigo', async (req, res) => {
     });
   }
 });
+
 
 module.exports = router;
 
