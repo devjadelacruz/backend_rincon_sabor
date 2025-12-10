@@ -3,6 +3,8 @@
 const express = require('express');
 const router = express.Router();
 const { authJwt } = require('../middlewares/authJwt');
+const admin = require('../config/firebaseConfig'); // 👈 agrega esto
+
 
 const { pool, query } = require('../config/connection');
 const { emitirActualizacionMesas } = require('../sockets/mesasSocket');
