@@ -2,8 +2,8 @@
 
 const express = require('express');
 const router = express.Router();
-const { authJwt } = require('../middlewares/authJwt');
-const admin = require('../config/firebaseConfig'); // 👈 agrega esto
+// const { authJwt } = require('../middlewares/authJwt');
+// const admin = require('../config/firebaseConfig'); // 👈 agrega esto
 
 
 const { pool, query } = require('../config/connection');
@@ -141,7 +141,7 @@ router.post('/actualizarDetallesPedido', async (req, res) => {
 // Crea un nuevo pedido y ajusta stock
 // ============================================================ 
 
-router.post('/crearPedido', authJwt, async (req, res) => {
+router.post('/crearPedido', async (req, res) => {
   const { MesaCodigo, Detalles } = req.body;
 
   if (!MesaCodigo || !Array.isArray(Detalles) || Detalles.length === 0) {
@@ -152,8 +152,8 @@ router.post('/crearPedido', authJwt, async (req, res) => {
   }
 
   // Datos que vienen del JWT (auth_v2.js → authJwt)
-  const usuarioCodigo = req.user?.id  || null;   // UsuarioCodigo
-  const usuarioRol    = req.user?.rol || null;   // admin / mesero / cocinero / cajero
+  const usuarioCodigo =  null;   // UsuarioCodigo
+  const usuarioRol    =  null;   // admin / mesero / cocinero / cajero
 
   const conn = await pool.getConnection();
   try {
