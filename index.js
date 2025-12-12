@@ -24,42 +24,37 @@ const prediccionesRouter = require('./routes/predicciones');
 // ===============================
 const authV2Routes = require('./routes/auth_v2');
 
-// 👇 IMPORTANTE: ya NO importamos middlewares de JWT ni roles
+// ❌ IMPORTANTE: NO importar middlewares de JWT ni roles
 // const { authJwt } = require('./middlewares/authJwt');
 // const { requireRole } = require('./middlewares/requireRole');
 
-// Crear instancia de la app Express
 const app = express();
 
 // ===============================
 // Middlewares globales
 // ===============================
-app.use(helmet());                               // Cabeceras de seguridad básicas
-app.use(cors());                                 // Permitir CORS (Flutter, web, etc.)
-app.use(express.urlencoded({ extended: true })); // Soporte para x-www-form-urlencoded
-app.use(express.json());                         // Parseo de JSON en el body
+app.use(helmet());
+app.use(cors());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 // =====================================================
-//  RUTAS ORIGINALES (v1) – SIN JWT
+//  RUTAS ORIGINALES (v1) – TODAS SIN JWT
 // =====================================================
 app.use('/mesas', mesasRouter);
 app.use('/usuarios', usuariosRouter);
 app.use('/categorias', categoriasRouter);
 app.use('/insumos', insumosRouter);
 app.use('/menu', menuRouter);
-
-// 👇 AHORA /pedidos NO TIENE authJwt (se desactiva validación de token)
-app.use('/pedidos', pedidosRouter);
-
+app.use('/pedidos', pedidosRouter);   // 👈 SIN authJwt
 app.use('/dataGraficos', dataGraficos);
 app.use('/predicciones', prediccionesRouter);
 
 // =====================================================
-//  RUTAS V2 DE AUTENTICACIÓN (solo login)
+//  RUTAS V2 (solo login)
 // =====================================================
 app.use('/api/v2', authV2Routes);
 
-// No montamos /api/v2/test ni rutas por rol
+// Nada de /api/v2/test ni rutas por rol
 
-// Exportar la app para que server.js la use
 module.exports = app;

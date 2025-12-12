@@ -504,11 +504,6 @@ router.put('/actualizarEstadoPedido/:PedidoCodigo', async (req, res) => {
     // 2) Si pasa a "listo" y hay usuario logueado → registrar COCINERO
     if (usuarioCodigo && estadoLower === 'listo') {
       await query(
-        `
-        UPDATE Pedidos_Pedido
-        SET PedidoUsuarioCocinero = COALESCE(PedidoUsuarioCocinero, ?)
-        WHERE PedidoCodigo = ?
-        `,
         [usuarioCodigo, PedidoCodigo]
       );
     }
@@ -650,22 +645,20 @@ router.post('/finalizar/:pedidoCodigo', async (req, res) => {
   }
 
   const sql = `
-    UPDATE Pedidos_Pedido
-    SET 
-      PedidoMetodoPagoCodigo = ?,
-      PedidoEstado = "servido",
-      PedidoUsuarioCobro = COALESCE(PedidoUsuarioCobro, ?)
-    WHERE PedidoCodigo = ?
-  `;
+  UPDATE Pedidos_Pedido
+  SET 
+    PedidoMetodoPagoCodigo = ?,
+    PedidoEstado = "servido"
+  WHERE PedidoCodigo = ?
+`;
 
   try {
     console.log('🔧 Ejecutando UPDATE de pedido (async/await)...');
 
-    const [result] = await pool.query(sql, [
-      metodoPagoCodigo,
-      usuarioCodigo,
-      pedidoCodigo
-    ]);
+   const [result] = await pool.query(sql, [
+  metodoPagoCodigo,
+  pedidoCodigo
+]);
 
     console.log('🔧 Resultado UPDATE:', result);
 
